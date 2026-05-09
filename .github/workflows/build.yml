@@ -62,7 +62,7 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             archive -archivePath build/IAPTest.xcarchive
 
-      - name: Export IPA
+      - name: Export development IPA (for TrollStore install)
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -77,8 +77,64 @@ jobs:
             -authenticationKeyIssuerID $ASC_ISSUER_ID
           ls -la build/ipa/
 
+      - name: Export app-store IPA (for ASC upload)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+        run: |
+          # Build app-store exportOptions
+          cat > exportOptions_appstore.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>${DEVELOPMENT_TEAM}</string>
+              <key>uploadSymbols</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/IAPTest.xcarchive \
+            -exportOptionsPlist exportOptions_appstore.plist \
+            -exportPath build/appstore \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID $ASC_KEY_ID \
+            -authenticationKeyIssuerID $ASC_ISSUER_ID
+          ls -la build/appstore/
+
+      - name: Upload to App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          IPA=$(ls build/appstore/*.ipa | head -1)
+          echo "Uploading $IPA to ASC..."
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA" \
+            --apiKey $ASC_KEY_ID \
+            --apiIssuer $ASC_ISSUER_ID \
+            --output-format xml || (echo "altool failed, retry once..." && sleep 30 && \
+              xcrun altool --upload-app --type ios --file "$IPA" --apiKey $ASC_KEY_ID --apiIssuer $ASC_ISSUER_ID --output-format xml)
+
       - uses: actions/upload-artifact@v4
         with:
           name: IAPTest-IPA
           path: build/ipa/*.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IAPTest-AppStore-IPA
+          path: build/appstore/*.ipa
           if-no-files-found: error
