@@ -1,0 +1,84 @@
+name: Build IAPTest IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Patch project.yml + exportOptions.plist with secrets
+        env:
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+          BUNDLE_ID: ${{ secrets.BUNDLE_ID }}
+          BUNDLE_PREFIX: ${{ secrets.BUNDLE_PREFIX }}
+        run: |
+          sed -i '' "s|REPLACE_BUNDLE_PREFIX|$BUNDLE_PREFIX|g" project.yml
+          sed -i '' "s|REPLACE_BUNDLE_ID|$BUNDLE_ID|g" project.yml
+          sed -i '' "s|REPLACE_TEAM_ID|$DEVELOPMENT_TEAM|g" project.yml
+          sed -i '' "s|REPLACE_TEAM_ID|$DEVELOPMENT_TEAM|g" exportOptions.plist
+          echo "=== project.yml ===" ; head -20 project.yml
+          echo "=== exportOptions.plist ===" ; cat exportOptions.plist
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Setup ASC API Key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          # Also place in default keys path
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_P8" > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          ls -la ~/.appstoreconnect/private_keys/
+
+      - name: Build & Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+        run: |
+          xcodebuild -project IAPTest.xcodeproj \
+            -scheme IAPTest \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID $ASC_KEY_ID \
+            -authenticationKeyIssuerID $ASC_ISSUER_ID \
+            DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM \
+            CODE_SIGN_STYLE=Automatic \
+            archive -archivePath build/IAPTest.xcarchive
+
+      - name: Export IPA
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/IAPTest.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath build/ipa \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID $ASC_KEY_ID \
+            -authenticationKeyIssuerID $ASC_ISSUER_ID
+          ls -la build/ipa/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IAPTest-IPA
+          path: build/ipa/*.ipa
+          if-no-files-found: error

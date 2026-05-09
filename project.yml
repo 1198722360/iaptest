@@ -1,0 +1,31 @@
+name: IAPTest
+options:
+  bundleIdPrefix: REPLACE_BUNDLE_PREFIX
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+targets:
+  IAPTest:
+    type: application
+    platform: iOS
+    sources:
+      - path: IAPTest
+    info:
+      path: IAPTest/Info.plist
+      properties:
+        UILaunchScreen:
+          UIColorName: ""
+        CFBundleDisplayName: IAPTest
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        UIRequiredDeviceCapabilities:
+          - arm64
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: REPLACE_BUNDLE_ID
+        DEVELOPMENT_TEAM: REPLACE_TEAM_ID
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        SWIFT_VERSION: "5.0"
