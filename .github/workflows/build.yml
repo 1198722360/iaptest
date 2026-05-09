@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +16,9 @@ jobs:
 
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Generate AppIcon assets
+        run: python3 generate_assets.py
 
       - name: Patch project.yml + exportOptions.plist with secrets
         env:
