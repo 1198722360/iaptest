@@ -20,23 +20,68 @@ final class StoreKitHelper: NSObject, ObservableObject, SKProductsRequestDelegat
     private var productsRequest: SKProductsRequest?
     private var refreshRequest: SKReceiptRefreshRequest?
 
+    /// Path to log file: ~/Documents/iaptest_log.txt
+    private lazy var logURL: URL = {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        return docs.appendingPathComponent("iaptest_log.txt")
+    }()
+
+    private func log(_ msg: String) {
+        let ts = ISO8601DateFormatter().string(from: Date())
+        let line = "[\(ts)] \(msg)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logURL.path) {
+                if let h = try? FileHandle(forWritingTo: logURL) {
+                    h.seekToEndOfFile()
+                    h.write(data)
+                    try? h.close()
+                }
+            } else {
+                try? data.write(to: logURL)
+            }
+        }
+        NSLog("[IAPTest] %@", msg)
+    }
+
     func start() {
+        // Reset log on each launch
+        try? "".write(to: logURL, atomically: true, encoding: .utf8)
+        log("=== IAPTest launched pid=\(ProcessInfo.processInfo.processIdentifier) ===")
+        log("bundleId=\(Bundle.main.bundleIdentifier ?? "?")")
+        log("productID=\(Self.productID)")
+        log("Documents=\(logURL.deletingLastPathComponent().path)")
         SKPaymentQueue.default().add(self)
         state = "observer added"
+        log("SKPaymentQueue observer added")
         loadExistingReceipt()
     }
 
     func fetchProduct() {
         state = "fetching..."
+        log("=== fetchProduct called for pid=\(Self.productID) ===")
         let req = SKProductsRequest(productIdentifiers: [Self.productID])
         req.delegate = self
         productsRequest = req
         req.start()
+        log("SKProductsRequest started")
     }
 
     // MARK: - SKProductsRequestDelegate
 
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
+        log("productsRequest didReceive: products=\(response.products.count) invalid=\(response.invalidProductIdentifiers.count)")
+        for p in response.products {
+            log("  PRODUCT: id=\(p.productIdentifier) price=\(p.price) currency=\(p.priceLocale.currencyCode ?? "?") title=\(p.localizedTitle) desc=\(p.localizedDescription)")
+            if let sp = p.subscriptionPeriod {
+                log("    sub period=\(sp.numberOfUnits) unit=\(sp.unit.rawValue) groupId=\(p.subscriptionGroupIdentifier ?? "?")")
+            }
+            if let intro = p.introductoryPrice {
+                log("    intro price=\(intro.price) period=\(intro.subscriptionPeriod.numberOfUnits) numPeriods=\(intro.numberOfPeriods)")
+            }
+        }
+        for invalid in response.invalidProductIdentifiers {
+            log("  INVALID: \(invalid)")
+        }
         DispatchQueue.main.async {
             if let p = response.products.first {
                 self.product = p
@@ -57,6 +102,8 @@ final class StoreKitHelper: NSObject, ObservableObject, SKProductsRequestDelegat
     }
 
     func request(_ request: SKRequest, didFailWithError error: Error) {
+        let nse = error as NSError
+        log("request DIDFAIL: domain=\(nse.domain) code=\(nse.code) desc=\(nse.localizedDescription) userInfo=\(nse.userInfo)")
         DispatchQueue.main.async {
             self.state = "request failed: \(error.localizedDescription)"
         }
@@ -93,15 +140,20 @@ final class StoreKitHelper: NSObject, ObservableObject, SKProductsRequestDelegat
 
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
         for tx in transactions {
+            log("TX update: state=\(txStateName(tx.transactionState)) pid=\(tx.payment.productIdentifier) txid=\(tx.transactionIdentifier ?? "?") origTxid=\(tx.original?.transactionIdentifier ?? "?")")
             DispatchQueue.main.async {
                 self.state = "tx state=\(self.txStateName(tx.transactionState)) pid=\(tx.payment.productIdentifier)"
             }
             switch tx.transactionState {
             case .purchased, .restored:
+                log("TX purchased/restored - loading receipt")
                 loadExistingReceipt()
                 SKPaymentQueue.default().finishTransaction(tx)
+                log("TX finished")
             case .failed:
                 if let e = tx.error {
+                    let nse = e as NSError
+                    log("TX FAILED: domain=\(nse.domain) code=\(nse.code) desc=\(nse.localizedDescription)")
                     DispatchQueue.main.async {
                         self.state = "tx failed: \(e.localizedDescription)"
                     }
@@ -115,14 +167,29 @@ final class StoreKitHelper: NSObject, ObservableObject, SKProductsRequestDelegat
     // MARK: - Helpers
 
     func loadExistingReceipt() {
-        guard let url = Bundle.main.appStoreReceiptURL,
-              let data = try? Data(contentsOf: url) else {
+        guard let url = Bundle.main.appStoreReceiptURL else {
+            log("appStoreReceiptURL is nil")
             DispatchQueue.main.async {
                 self.receiptB64 = ""
                 self.receiptLen = 0
             }
             return
         }
+        log("appStoreReceiptURL=\(url.path)")
+        guard let data = try? Data(contentsOf: url) else {
+            log("receipt file does not exist or unreadable")
+            DispatchQueue.main.async {
+                self.receiptB64 = ""
+                self.receiptLen = 0
+            }
+            return
+        }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let copyURL = docs.appendingPathComponent("sandbox_receipt.bin")
+        try? data.write(to: copyURL)
+        let b64URL = docs.appendingPathComponent("sandbox_receipt.b64.txt")
+        try? data.base64EncodedString().write(to: b64URL, atomically: true, encoding: .utf8)
+        log("RECEIPT loaded len=\(data.count) saved to Documents/sandbox_receipt.bin and .b64.txt")
         DispatchQueue.main.async {
             self.receiptLen = data.count
             self.receiptB64 = data.base64EncodedString()
