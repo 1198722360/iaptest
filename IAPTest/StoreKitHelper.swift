@@ -66,6 +66,18 @@ final class StoreKitHelper: NSObject, ObservableObject, SKProductsRequestDelegat
         log("SKProductsRequest started")
     }
 
+    /// Skip SKProductsRequest entirely. Construct SKMutablePayment with raw productId
+    /// and add to queue. Useful to bypass storekit's "invalid product" client cache.
+    func directBuy() {
+        log("=== directBuy called for pid=\(Self.productID) (no SKProductsRequest) ===")
+        let payment = SKMutablePayment()
+        payment.productIdentifier = Self.productID
+        payment.applicationUsername = "test-user-1234"
+        SKPaymentQueue.default().add(payment)
+        state = "direct buy initiated..."
+        log("SKMutablePayment added to queue with raw productId")
+    }
+
     // MARK: - SKProductsRequestDelegate
 
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {

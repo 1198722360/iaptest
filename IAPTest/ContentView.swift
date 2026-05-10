@@ -22,6 +22,9 @@ struct ContentView: View {
                 Button("Refresh Receipt") { helper.refreshReceipt() }
                     .buttonStyle(.bordered)
             }
+            Button("Direct Buy (skip Fetch)") { helper.directBuy() }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
             Button("Copy Base64 Receipt") { UIPasteboard.general.string = helper.receiptB64 }
                 .buttonStyle(.bordered)
                 .disabled(helper.receiptB64.isEmpty)
